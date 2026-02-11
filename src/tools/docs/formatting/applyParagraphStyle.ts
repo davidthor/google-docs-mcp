@@ -1,12 +1,12 @@
 import type { FastMCP } from 'fastmcp';
 import { UserError } from 'fastmcp';
-import { getDocsClient } from '../../clients.js';
+import { getDocsClient } from '../../../clients.js';
 import {
   ApplyParagraphStyleToolParameters,
   ApplyParagraphStyleToolArgs,
   NotImplementedError,
-} from '../../types.js';
-import * as GDocsHelpers from '../../googleDocsApiHelpers.js';
+} from '../../../types.js';
+import * as GDocsHelpers from '../../../googleDocsApiHelpers.js';
 
 export function register(server: FastMCP) {
   server.addTool({

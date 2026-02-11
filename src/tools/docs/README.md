@@ -2,6 +2,18 @@
 
 Tools for interacting with the Google Docs API. Covers reading and writing document content, text and paragraph formatting, structural elements like tables and images, and comment management.
 
+## Structure
+
+```
+docs/
+├── index.ts            # Router — registers top-level tools and delegates to sub-domains
+├── comments/           # Comment management sub-domain
+│   └── index.ts        # Router for comment tools
+├── formatting/         # Text and paragraph formatting sub-domain
+│   └── index.ts        # Router for formatting tools
+└── (top-level tools)   # Core read/write and structure tools
+```
+
 ## Core Read/Write
 
 | Tool | Description |
@@ -11,14 +23,6 @@ Tools for interacting with the Google Docs API. Covers reading and writing docum
 | `appendToGoogleDoc` | Appends text to the end of a Google Document or tab |
 | `insertText` | Inserts text at a specific index within the document body or a specific tab |
 | `deleteRange` | Deletes content within a specified range from the document or a specific tab |
-
-## Formatting
-
-| Tool | Description |
-|------|-------------|
-| `applyTextStyle` | Applies character-level formatting (bold, color, font, etc.) to a range or found text |
-| `applyParagraphStyle` | Applies paragraph-level formatting (alignment, spacing, named styles) |
-| `formatMatchingText` | Finds specific text and applies character formatting to the matched instance |
 
 ## Structure
 
@@ -32,7 +36,15 @@ Tools for interacting with the Google Docs API. Covers reading and writing docum
 | `fixListFormatting` | Experimental: detects and converts text that looks like lists into proper formatted lists |
 | `findElement` | Finds elements based on various criteria (not yet implemented) |
 
-## Comments
+## [Formatting](./formatting/)
+
+| Tool | Description |
+|------|-------------|
+| `applyTextStyle` | Applies character-level formatting (bold, color, font, etc.) to a range or found text |
+| `applyParagraphStyle` | Applies paragraph-level formatting (alignment, spacing, named styles) |
+| `formatMatchingText` | Finds specific text and applies character formatting to the matched instance |
+
+## [Comments](./comments/)
 
 | Tool | Description |
 |------|-------------|

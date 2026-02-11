@@ -2,8 +2,8 @@ import type { FastMCP } from 'fastmcp';
 import { UserError } from 'fastmcp';
 import { z } from 'zod';
 import { google } from 'googleapis';
-import { getAuthClient } from '../../clients.js';
-import { DocumentIdParameter } from '../../types.js';
+import { getAuthClient } from '../../../clients.js';
+import { DocumentIdParameter } from '../../../types.js';
 
 export function register(server: FastMCP) {
   server.addTool({

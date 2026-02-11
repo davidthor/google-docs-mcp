@@ -1,9 +1,9 @@
 import type { FastMCP } from 'fastmcp';
 import { UserError } from 'fastmcp';
 import { z } from 'zod';
-import { getDocsClient } from '../../clients.js';
-import { TextStyleArgs } from '../../types.js';
-import * as GDocsHelpers from '../../googleDocsApiHelpers.js';
+import { getDocsClient } from '../../../clients.js';
+import { TextStyleArgs } from '../../../types.js';
+import * as GDocsHelpers from '../../../googleDocsApiHelpers.js';
 
 export function register(server: FastMCP) {
   // --- Preserve the existing formatMatchingText tool for backward compatibility ---

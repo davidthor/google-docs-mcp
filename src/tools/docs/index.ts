@@ -7,11 +7,6 @@ import { register as appendToGoogleDoc } from './appendToGoogleDoc.js';
 import { register as insertText } from './insertText.js';
 import { register as deleteRange } from './deleteRange.js';
 
-// Formatting
-import { register as applyTextStyle } from './applyTextStyle.js';
-import { register as applyParagraphStyle } from './applyParagraphStyle.js';
-import { register as formatMatchingText } from './formatMatchingText.js';
-
 // Structure
 import { register as insertTable } from './insertTable.js';
 import { register as editTableCell } from './editTableCell.js';
@@ -21,13 +16,9 @@ import { register as insertLocalImage } from './insertLocalImage.js';
 import { register as fixListFormatting } from './fixListFormatting.js';
 import { register as findElement } from './findElement.js';
 
-// Comments
-import { register as listComments } from './listComments.js';
-import { register as getComment } from './getComment.js';
-import { register as addComment } from './addComment.js';
-import { register as replyToComment } from './replyToComment.js';
-import { register as resolveComment } from './resolveComment.js';
-import { register as deleteComment } from './deleteComment.js';
+// Sub-domains
+import { registerCommentTools } from './comments/index.js';
+import { registerFormattingTools } from './formatting/index.js';
 
 export function registerDocsTools(server: FastMCP) {
   // Core read/write
@@ -36,11 +27,6 @@ export function registerDocsTools(server: FastMCP) {
   appendToGoogleDoc(server);
   insertText(server);
   deleteRange(server);
-
-  // Formatting
-  applyTextStyle(server);
-  applyParagraphStyle(server);
-  formatMatchingText(server);
 
   // Structure
   insertTable(server);
@@ -51,11 +37,7 @@ export function registerDocsTools(server: FastMCP) {
   fixListFormatting(server);
   findElement(server);
 
-  // Comments
-  listComments(server);
-  getComment(server);
-  addComment(server);
-  replyToComment(server);
-  resolveComment(server);
-  deleteComment(server);
+  // Sub-domains
+  registerFormattingTools(server);
+  registerCommentTools(server);
 }

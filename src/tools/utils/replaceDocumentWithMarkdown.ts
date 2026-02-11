@@ -12,17 +12,12 @@ export function register(server: FastMCP) {
     description:
       'Replaces the entire content of a Google Document with markdown-formatted content. Supports headings (# H1-###### H6), bold (**bold**), italic (*italic*), strikethrough (~~strike~~), links ([text](url)), and lists (bullet and numbered).',
     parameters: DocumentIdParameter.extend({
-      markdown: z
-        .string()
-        .min(1)
-        .describe('The markdown content to apply to the document.'),
+      markdown: z.string().min(1).describe('The markdown content to apply to the document.'),
       preserveTitle: z
         .boolean()
         .optional()
         .default(false)
-        .describe(
-          'If true, preserves the first heading/title and replaces content after it.'
-        ),
+        .describe('If true, preserves the first heading/title and replaces content after it.'),
       tabId: z
         .string()
         .optional()
@@ -41,9 +36,7 @@ export function register(server: FastMCP) {
         const doc = await docs.documents.get({
           documentId: args.documentId,
           includeTabsContent: !!args.tabId,
-          fields: args.tabId
-            ? 'tabs'
-            : 'body(content(startIndex,endIndex))',
+          fields: args.tabId ? 'tabs' : 'body(content(startIndex,endIndex))',
         });
 
         // 2. Calculate replacement range
@@ -53,9 +46,7 @@ export function register(server: FastMCP) {
         if (args.tabId) {
           const targetTab = GDocsHelpers.findTabById(doc.data, args.tabId);
           if (!targetTab) {
-            throw new UserError(
-              `Tab with ID "${args.tabId}" not found in document.`
-            );
+            throw new UserError(`Tab with ID "${args.tabId}" not found in document.`);
           }
           if (!targetTab.documentTab) {
             throw new UserError(
@@ -89,9 +80,7 @@ export function register(server: FastMCP) {
           if (args.tabId) {
             deleteRange.tabId = args.tabId;
           }
-          log.info(
-            `Deleting content from index ${startIndex} to ${endIndex} (separate API call)`
-          );
+          log.info(`Deleting content from index ${startIndex} to ${endIndex} (separate API call)`);
           await GDocsHelpers.executeBatchUpdate(docs, args.documentId, [
             {
               deleteContentRange: { range: deleteRange },
@@ -104,15 +93,9 @@ export function register(server: FastMCP) {
         log.info(
           `Converting markdown starting at index ${startIndex} (after delete, document should be empty)`
         );
-        const markdownRequests = convertMarkdownToRequests(
-          args.markdown,
-          startIndex,
-          args.tabId
-        );
+        const markdownRequests = convertMarkdownToRequests(args.markdown, startIndex, args.tabId);
         log.info(`Generated ${markdownRequests.length} requests from markdown`);
-        log.info(
-          `First 3 requests: ${JSON.stringify(markdownRequests.slice(0, 3), null, 2)}`
-        );
+        log.info(`First 3 requests: ${JSON.stringify(markdownRequests.slice(0, 3), null, 2)}`);
 
         // 5. Execute markdown requests (insert + format) in separate API call(s)
         await GDocsHelpers.executeBatchUpdateWithSplitting(
@@ -125,18 +108,11 @@ export function register(server: FastMCP) {
         log.info(`Successfully replaced document content`);
         return `Successfully replaced document content with ${args.markdown.length} characters of markdown (${markdownRequests.length} operations).`;
       } catch (error: any) {
-        log.error(
-          `Error replacing document with markdown: ${error.message}`
-        );
-        if (
-          error instanceof UserError ||
-          error instanceof MarkdownConversionError
-        ) {
+        log.error(`Error replacing document with markdown: ${error.message}`);
+        if (error instanceof UserError || error instanceof MarkdownConversionError) {
           throw error;
         }
-        throw new UserError(
-          `Failed to apply markdown: ${error.message || 'Unknown error'}`
-        );
+        throw new UserError(`Failed to apply markdown: ${error.message || 'Unknown error'}`);
       }
     },
   });
