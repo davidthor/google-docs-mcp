@@ -6,20 +6,21 @@ import { getDriveClient } from '../../clients.js';
 export function register(server: FastMCP) {
   server.addTool({
     name: 'deleteFile',
-    description: 'Permanently deletes a file or folder from Google Drive.',
+    description:
+      'Moves a file or folder to the trash, or permanently deletes it. Set permanent=true for irreversible deletion.',
     parameters: z.object({
-      fileId: z.string().describe('ID of the file or folder to delete.'),
-      skipTrash: z
+      fileId: z
+        .string()
+        .describe('The file or folder ID from a Google Drive URL or a previous tool result.'),
+      permanent: z
         .boolean()
         .optional()
         .default(false)
-        .describe(
-          'If true, permanently deletes the file. If false, moves to trash (can be restored).'
-        ),
+        .describe('If true, permanently deletes the file instead of moving it to trash.'),
     }),
     execute: async (args, { log }) => {
       const drive = await getDriveClient();
-      log.info(`Deleting file ${args.fileId} ${args.skipTrash ? '(permanent)' : '(to trash)'}`);
+      log.info(`Deleting file ${args.fileId} ${args.permanent ? '(permanent)' : '(to trash)'}`);
 
       try {
         // Get file info before deletion
@@ -32,12 +33,23 @@ export function register(server: FastMCP) {
         const fileName = fileInfo.data.name;
         const isFolder = fileInfo.data.mimeType === 'application/vnd.google-apps.folder';
 
-        if (args.skipTrash) {
+        if (args.permanent) {
           await drive.files.delete({
             fileId: args.fileId,
             supportsAllDrives: true,
           });
-          return `Permanently deleted ${isFolder ? 'folder' : 'file'} "${fileName}".`;
+          return JSON.stringify(
+            {
+              success: true,
+              action: 'permanently_deleted',
+              fileId: args.fileId,
+              fileName,
+              type: isFolder ? 'folder' : 'file',
+              message: `Permanently deleted ${isFolder ? 'folder' : 'file'} "${fileName}".`,
+            },
+            null,
+            2
+          );
         } else {
           await drive.files.update({
             fileId: args.fileId,
@@ -46,7 +58,18 @@ export function register(server: FastMCP) {
             },
             supportsAllDrives: true,
           });
-          return `Moved ${isFolder ? 'folder' : 'file'} "${fileName}" to trash. It can be restored from the trash.`;
+          return JSON.stringify(
+            {
+              success: true,
+              action: 'trashed',
+              fileId: args.fileId,
+              fileName,
+              type: isFolder ? 'folder' : 'file',
+              message: `Moved ${isFolder ? 'folder' : 'file'} "${fileName}" to trash. It can be restored from the trash.`,
+            },
+            null,
+            2
+          );
         }
       } catch (error: any) {
         log.error(`Error deleting file: ${error.message || error}`);

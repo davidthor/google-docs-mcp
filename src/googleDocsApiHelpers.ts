@@ -3,6 +3,7 @@ import { google, docs_v1 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { UserError } from 'fastmcp';
 import { TextStyleArgs, ParagraphStyleArgs, hexToRgbColor, NotImplementedError } from './types.js';
+import { logger } from './logger.js';
 
 type Docs = docs_v1.Docs; // Alias for convenience
 
@@ -22,7 +23,7 @@ export async function executeBatchUpdate(
 
   // TODO: Consider splitting large request arrays into multiple batches if needed
   if (requests.length > MAX_BATCH_UPDATE_REQUESTS) {
-    console.warn(
+    logger.warn(
       `Attempting batch update with ${requests.length} requests, exceeding typical limits. May fail.`
     );
   }
@@ -34,7 +35,7 @@ export async function executeBatchUpdate(
     });
     return response.data;
   } catch (error: any) {
-    console.error(
+    logger.error(
       `Google API batchUpdate Error for doc ${documentId}:`,
       error.response?.data || error.message
     );
@@ -62,6 +63,23 @@ export async function executeBatchUpdate(
 }
 
 // --- Batch Update with Automatic Splitting ---
+
+/** Metadata returned by executeBatchUpdateWithSplitting for debugging / observability. */
+export interface BatchUpdateMetadata {
+  /** Total number of individual requests across all phases. */
+  totalRequests: number;
+  /** Breakdown of requests by phase. */
+  phases: {
+    delete: { requests: number; apiCalls: number; elapsedMs: number };
+    insert: { requests: number; apiCalls: number; elapsedMs: number };
+    format: { requests: number; apiCalls: number; elapsedMs: number };
+  };
+  /** Total number of HTTP batchUpdate calls made to the Docs API. */
+  totalApiCalls: number;
+  /** Wall-clock time for the entire operation (all phases), in milliseconds. */
+  totalElapsedMs: number;
+}
+
 /**
  * Executes batch updates with automatic splitting for large request arrays.
  * Separates insert and format operations, executing inserts first.
@@ -70,15 +88,27 @@ export async function executeBatchUpdate(
  * @param documentId - The document ID
  * @param requests - Array of requests to execute
  * @param log - Optional logger for progress tracking
+ * @returns Metadata about the execution (request counts, API calls, timing)
  */
 export async function executeBatchUpdateWithSplitting(
   docs: Docs,
   documentId: string,
   requests: docs_v1.Schema$Request[],
   log?: { info: (msg: string) => void }
-): Promise<void> {
+): Promise<BatchUpdateMetadata> {
+  const overallStart = performance.now();
+
   if (!requests || requests.length === 0) {
-    return;
+    return {
+      totalRequests: 0,
+      phases: {
+        delete: { requests: 0, apiCalls: 0, elapsedMs: 0 },
+        insert: { requests: 0, apiCalls: 0, elapsedMs: 0 },
+        format: { requests: 0, apiCalls: 0, elapsedMs: 0 },
+      },
+      totalApiCalls: 0,
+      totalElapsedMs: 0,
+    };
   }
 
   const MAX_BATCH = MAX_BATCH_UPDATE_REQUESTS;
@@ -106,7 +136,10 @@ export async function executeBatchUpdateWithSplitting(
       )
   );
 
+  let totalApiCalls = 0;
+
   // Execute delete batches first (must happen before inserts)
+  const deleteStart = performance.now();
   if (deleteRequests.length > 0) {
     if (log) {
       log.info(`Executing ${deleteRequests.length} delete requests FIRST (in separate API call)`);
@@ -117,6 +150,7 @@ export async function executeBatchUpdateWithSplitting(
         log.info(`Delete batch content: ${JSON.stringify(batch)}`);
       }
       await executeBatchUpdate(docs, documentId, batch);
+      totalApiCalls++;
       if (log) {
         const batchNum = Math.floor(i / MAX_BATCH) + 1;
         const totalBatches = Math.ceil(deleteRequests.length / MAX_BATCH);
@@ -127,12 +161,15 @@ export async function executeBatchUpdateWithSplitting(
       log.info(`Delete batches complete. Document should now be empty (except section break).`);
     }
   }
+  const deleteElapsed = performance.now() - deleteStart;
 
   // Then execute insert batches
+  const insertStart = performance.now();
   if (insertRequests.length > 0) {
     for (let i = 0; i < insertRequests.length; i += MAX_BATCH) {
       const batch = insertRequests.slice(i, i + MAX_BATCH);
       await executeBatchUpdate(docs, documentId, batch);
+      totalApiCalls++;
       if (log) {
         const batchNum = Math.floor(i / MAX_BATCH) + 1;
         const totalBatches = Math.ceil(insertRequests.length / MAX_BATCH);
@@ -140,12 +177,15 @@ export async function executeBatchUpdateWithSplitting(
       }
     }
   }
+  const insertElapsed = performance.now() - insertStart;
 
   // Finally execute format batches
+  const formatStart = performance.now();
   if (formatRequests.length > 0) {
     for (let i = 0; i < formatRequests.length; i += MAX_BATCH) {
       const batch = formatRequests.slice(i, i + MAX_BATCH);
       await executeBatchUpdate(docs, documentId, batch);
+      totalApiCalls++;
       if (log) {
         const batchNum = Math.floor(i / MAX_BATCH) + 1;
         const totalBatches = Math.ceil(formatRequests.length / MAX_BATCH);
@@ -153,6 +193,32 @@ export async function executeBatchUpdateWithSplitting(
       }
     }
   }
+  const formatElapsed = performance.now() - formatStart;
+
+  const totalElapsedMs = performance.now() - overallStart;
+
+  return {
+    totalRequests: requests.length,
+    phases: {
+      delete: {
+        requests: deleteRequests.length,
+        apiCalls: Math.ceil(deleteRequests.length / MAX_BATCH) || 0,
+        elapsedMs: Math.round(deleteElapsed),
+      },
+      insert: {
+        requests: insertRequests.length,
+        apiCalls: Math.ceil(insertRequests.length / MAX_BATCH) || 0,
+        elapsedMs: Math.round(insertElapsed),
+      },
+      format: {
+        requests: formatRequests.length,
+        apiCalls: Math.ceil(formatRequests.length / MAX_BATCH) || 0,
+        elapsedMs: Math.round(formatElapsed),
+      },
+    },
+    totalApiCalls,
+    totalElapsedMs: Math.round(totalElapsedMs),
+  };
 }
 
 // --- Text Finding Helper ---
@@ -173,7 +239,7 @@ export async function findTextRange(
     });
 
     if (!res.data.body?.content) {
-      console.warn(`No content found in document ${documentId}`);
+      logger.warn(`No content found in document ${documentId}`);
       return null;
     }
 
@@ -221,7 +287,7 @@ export async function findTextRange(
     // Sort segments by starting position to ensure correct ordering
     segments.sort((a, b) => a.start - b.start);
 
-    console.error(
+    logger.debug(
       `Document ${documentId} contains ${segments.length} text segments and ${fullText.length} characters in total.`
     );
 
@@ -234,14 +300,14 @@ export async function findTextRange(
     while (foundCount < instance) {
       const currentIndex = fullText.indexOf(textToFind, searchStartIndex);
       if (currentIndex === -1) {
-        console.error(
+        logger.debug(
           `Search text "${textToFind}" not found for instance ${foundCount + 1} (requested: ${instance})`
         );
         break;
       }
 
       foundCount++;
-      console.error(
+      logger.debug(
         `Found instance ${foundCount} of "${textToFind}" at position ${currentIndex} in full text`
       );
 
@@ -250,7 +316,7 @@ export async function findTextRange(
         const targetEndInFullText = currentIndex + textToFind.length;
         let currentPosInFullText = 0;
 
-        console.error(
+        logger.debug(
           `Target text range in full text: ${targetStartInFullText}-${targetEndInFullText}`
         );
 
@@ -266,38 +332,41 @@ export async function findTextRange(
             targetStartInFullText < segEndInFullText
           ) {
             startIndex = seg.start + (targetStartInFullText - segStartInFullText);
-            console.error(
-              `Mapped start to segment ${seg.start}-${seg.end}, position ${startIndex}`
-            );
+            logger.debug(`Mapped start to segment ${seg.start}-${seg.end}, position ${startIndex}`);
           }
 
           if (targetEndInFullText > segStartInFullText && targetEndInFullText <= segEndInFullText) {
             endIndex = seg.start + (targetEndInFullText - segStartInFullText);
-            console.error(`Mapped end to segment ${seg.start}-${seg.end}, position ${endIndex}`);
+            logger.debug(`Mapped end to segment ${seg.start}-${seg.end}, position ${endIndex}`);
             break;
           }
 
           currentPosInFullText = segEndInFullText;
         }
 
-        if (startIndex !== -1 && endIndex !== -1) {
-          console.error(
-            `Successfully mapped "${textToFind}" to document range ${startIndex}-${endIndex}`
+        if (startIndex === -1 || endIndex === -1) {
+          logger.warn(
+            `Failed to map text "${textToFind}" instance ${instance} to actual document indices`
           );
           return { startIndex, endIndex };
         }
+
+        logger.debug(
+          `Successfully mapped "${textToFind}" to document range ${startIndex}-${endIndex}`
+        );
+        return { startIndex, endIndex };
       }
 
       // Prepare for next search iteration
       searchStartIndex = currentIndex + 1;
     }
 
-    console.warn(
+    logger.warn(
       `Could not find instance ${instance} of text "${textToFind}" in document ${documentId}`
     );
     return null; // Instance not found or mapping failed for all attempts
   } catch (error: any) {
-    console.error(
+    logger.error(
       `Error finding text "${textToFind}" in doc ${documentId}: ${error.message || 'Unknown error'}`
     );
     if (error.code === 404)
@@ -318,7 +387,7 @@ export async function getParagraphRange(
   indexWithin: number
 ): Promise<{ startIndex: number; endIndex: number } | null> {
   try {
-    console.error(`Finding paragraph containing index ${indexWithin} in document ${documentId}`);
+    logger.debug(`Finding paragraph containing index ${indexWithin} in document ${documentId}`);
 
     // Request more detailed document structure to handle nested elements
     const res = await docs.documents.get({
@@ -328,7 +397,7 @@ export async function getParagraphRange(
     });
 
     if (!res.data.body?.content) {
-      console.warn(`No content found in document ${documentId}`);
+      logger.warn(`No content found in document ${documentId}`);
       return null;
     }
 
@@ -344,7 +413,7 @@ export async function getParagraphRange(
           if (indexWithin >= element.startIndex && indexWithin < element.endIndex) {
             // If it's a paragraph, we've found our target
             if (element.paragraph) {
-              console.error(
+              logger.debug(
                 `Found paragraph containing index ${indexWithin}, range: ${element.startIndex}-${element.endIndex}`
               );
               return {
@@ -355,7 +424,7 @@ export async function getParagraphRange(
 
             // If it's a table, we need to check cells recursively
             if (element.table && element.table.tableRows) {
-              console.error(`Index ${indexWithin} is within a table, searching cells...`);
+              logger.debug(`Index ${indexWithin} is within a table, searching cells...`);
               for (const row of element.table.tableRows) {
                 if (row.tableCells) {
                   for (const cell of row.tableCells) {
@@ -369,7 +438,7 @@ export async function getParagraphRange(
             }
             // For other structural elements, we didn't find a paragraph
             // but we know the index is within this element
-            console.warn(
+            logger.warn(
               `Index ${indexWithin} is within element (${element.startIndex}-${element.endIndex}) but not in a paragraph`
             );
           }
@@ -382,16 +451,16 @@ export async function getParagraphRange(
     const paragraphRange = findParagraphInContent(res.data.body.content);
 
     if (!paragraphRange) {
-      console.warn(`Could not find paragraph containing index ${indexWithin}`);
+      logger.warn(`Could not find paragraph containing index ${indexWithin}`);
     } else {
-      console.error(
+      logger.debug(
         `Returning paragraph range: ${paragraphRange.startIndex}-${paragraphRange.endIndex}`
       );
     }
 
     return paragraphRange;
   } catch (error: any) {
-    console.error(
+    logger.error(
       `Error getting paragraph range for index ${indexWithin} in doc ${documentId}: ${error.message || 'Unknown error'}`
     );
     if (error.code === 404)
@@ -484,7 +553,7 @@ export function buildUpdateParagraphStyleRequest(
   const paragraphStyle: docs_v1.Schema$ParagraphStyle = {};
   const fieldsToUpdate: string[] = [];
 
-  console.error(
+  logger.debug(
     `Building paragraph style request for range ${startIndex}-${endIndex} with options:`,
     style
   );
@@ -493,52 +562,52 @@ export function buildUpdateParagraphStyleRequest(
   if (style.alignment !== undefined) {
     paragraphStyle.alignment = style.alignment;
     fieldsToUpdate.push('alignment');
-    console.error(`Setting alignment to ${style.alignment}`);
+    logger.debug(`Setting alignment to ${style.alignment}`);
   }
 
   // Process indentation options
   if (style.indentStart !== undefined) {
     paragraphStyle.indentStart = { magnitude: style.indentStart, unit: 'PT' };
     fieldsToUpdate.push('indentStart');
-    console.error(`Setting left indent to ${style.indentStart}pt`);
+    logger.debug(`Setting left indent to ${style.indentStart}pt`);
   }
 
   if (style.indentEnd !== undefined) {
     paragraphStyle.indentEnd = { magnitude: style.indentEnd, unit: 'PT' };
     fieldsToUpdate.push('indentEnd');
-    console.error(`Setting right indent to ${style.indentEnd}pt`);
+    logger.debug(`Setting right indent to ${style.indentEnd}pt`);
   }
 
   // Process spacing options
   if (style.spaceAbove !== undefined) {
     paragraphStyle.spaceAbove = { magnitude: style.spaceAbove, unit: 'PT' };
     fieldsToUpdate.push('spaceAbove');
-    console.error(`Setting space above to ${style.spaceAbove}pt`);
+    logger.debug(`Setting space above to ${style.spaceAbove}pt`);
   }
 
   if (style.spaceBelow !== undefined) {
     paragraphStyle.spaceBelow = { magnitude: style.spaceBelow, unit: 'PT' };
     fieldsToUpdate.push('spaceBelow');
-    console.error(`Setting space below to ${style.spaceBelow}pt`);
+    logger.debug(`Setting space below to ${style.spaceBelow}pt`);
   }
 
   // Process named style types (headings, etc.)
   if (style.namedStyleType !== undefined) {
     paragraphStyle.namedStyleType = style.namedStyleType;
     fieldsToUpdate.push('namedStyleType');
-    console.error(`Setting named style to ${style.namedStyleType}`);
+    logger.debug(`Setting named style to ${style.namedStyleType}`);
   }
 
   // Process page break control
   if (style.keepWithNext !== undefined) {
     paragraphStyle.keepWithNext = style.keepWithNext;
     fieldsToUpdate.push('keepWithNext');
-    console.error(`Setting keepWithNext to ${style.keepWithNext}`);
+    logger.debug(`Setting keepWithNext to ${style.keepWithNext}`);
   }
 
   // Verify we have styles to apply
   if (fieldsToUpdate.length === 0) {
-    console.warn('No paragraph styling options were provided');
+    logger.warn('No paragraph styling options were provided');
     return null; // No styles to apply
   }
 
@@ -557,7 +626,7 @@ export function buildUpdateParagraphStyleRequest(
     },
   };
 
-  console.error(`Created paragraph style request with fields: ${fieldsToUpdate.join(', ')}`);
+  logger.debug(`Created paragraph style request with fields: ${fieldsToUpdate.join(', ')}`);
   return { request, fields: fieldsToUpdate };
 }
 
@@ -693,7 +762,7 @@ export async function findParagraphsMatchingStyle(
   // 2. Iterate through paragraphs.
   // 3. For each paragraph, check if its computed style matches the criteria.
   // 4. Return ranges of matching paragraphs.
-  console.warn('findParagraphsMatchingStyle is not implemented.');
+  logger.warn('findParagraphsMatchingStyle is not implemented.');
   throw new NotImplementedError('Finding paragraphs by style criteria is not yet implemented.');
   // return [];
 }
@@ -712,7 +781,7 @@ export async function detectAndFormatLists(
   // 5. Generate CreateParagraphBulletsRequests for the identified sequences.
   // 6. Potentially delete the original marker text.
   // 7. Execute the batch update.
-  console.warn('detectAndFormatLists is not implemented.');
+  logger.warn('detectAndFormatLists is not implemented.');
   throw new NotImplementedError('Automatic list detection and formatting is not yet implemented.');
   // return {};
 }
@@ -747,7 +816,7 @@ anchor: JSON.stringify({ // Anchor format might need verification
 fields: 'id'
 });
 */
-  console.warn('addCommentHelper requires Google Drive API and is not implemented.');
+  logger.warn('addCommentHelper requires Google Drive API and is not implemented.');
   throw new NotImplementedError(
     'Adding comments requires Drive API setup and is not yet implemented.'
   );
