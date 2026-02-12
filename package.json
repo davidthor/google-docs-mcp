@@ -1,5 +1,5 @@
 {
-  "name": "@davidthor/google-docs-mcp",
+  "name": "google-docs-mcp",
   "version": "1.0.0",
   "type": "module",
   "bin": {
@@ -27,7 +27,7 @@
     "google-sheets",
     "google-drive"
   ],
-  "author": "davidthor",
+  "author": "a-bonus",
   "license": "ISC",
   "description": "MCP server for Google Docs, Sheets, and Drive",
   "dependencies": {
